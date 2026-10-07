@@ -196,4 +196,4 @@ jobs:
           omitBody: true
           omitName: true
           tag: ${{ inputs.version }}
-          replacesArtifacts: false
+          replacesArtifacts: true

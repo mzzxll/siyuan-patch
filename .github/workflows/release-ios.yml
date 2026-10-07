@@ -4,11 +4,25 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "release version/tag"
+        description: "release version/tag (e.g. v3.8.6 or 3.8.6)"
         required: true
+        type: string
       packageManager:
-        description: "pnpm@x.x.x"
+        description: "pnpm@x.x.x (leave empty to use app/package.json)"
+        required: false
+        type: string
+      iosRef:
+        description: "siyuan-ios commit SHA (default matches v3.8.6; update for other versions)"
         required: true
+        default: "caec608b218d026748dd93b4fdab8308e46e5341"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-ios-${{ inputs.version }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -21,33 +35,59 @@ jobs:
             target: "ios"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: siyuan-note
+          persist-credentials: false
 
-      - name: clone origin and apply patches
+      - name: Validate release inputs
+        id: release
+        env:
+          VERSION: ${{ inputs.version }}
+          IOS_REF: ${{ inputs.iosRef }}
         run: |
-          mkdir -p ${{ github.workspace }}/go
-          cd ${{ github.workspace }}/siyuan-note/
+          APP_VERSION="${VERSION#v}"
+          if [[ ! "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version must be vX.Y.Z or X.Y.Z"
+            exit 1
+          fi
+          if [[ ! "$IOS_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::iosRef must be a full commit SHA"
+            exit 1
+          fi
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$APP_VERSION" >> "$GITHUB_OUTPUT"
 
-          git clone --branch ${{ github.event.inputs.version }} https://github.com/siyuan-note/siyuan.git
+      - name: Clone origin and apply patches
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          IOS_REF: ${{ inputs.iosRef }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/go"
+          cd "$GITHUB_WORKSPACE/siyuan-note"
+
+          git clone --branch "$TAG" https://github.com/siyuan-note/siyuan.git
           cd siyuan
-
-          git apply --3way ${{ github.workspace }}/siyuan-note/patches/siyuan.patch
-
+          git apply --3way "$GITHUB_WORKSPACE/siyuan-note/patches/siyuan.patch"
+          git rev-parse HEAD
+          git diff --check --cached
 
           cd ..
-
           git clone https://github.com/siyuan-note/siyuan-ios.git
           cd siyuan-ios
+          git checkout --detach "$IOS_REF"
+          git rev-parse HEAD
 
-          # https://github.com/siyuan-note/siyuan-ios/commit/d72cd11a6d78df88b56a2850f0f46c2b905a5433 
-          # ASSETCATALOG_COMPILER_APPICON_NAME = logo;
-          # 但代码里只有 AppIcon.appiconset，先复制一份看看后续会不会修复
-          cp -r siyuan-ios/Assets.xcassets/AppIcon.appiconset siyuan-ios/Assets.xcassets/logo.appiconset
+          # Keep the legacy app icon fallback alongside logo.icon.
+          if [ ! -d siyuan-ios/Assets.xcassets/logo.appiconset ]; then
+            cp -r siyuan-ios/Assets.xcassets/AppIcon.appiconset siyuan-ios/Assets.xcassets/logo.appiconset
+          fi
 
-          sed -i '' 's/MARKETING_VERSION =\(.*\)/MARKETING_VERSION = ${{ github.event.inputs.version }};/g' siyuan-ios.xcodeproj/project.pbxproj
-          sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER =\(.*\)/PRODUCT_BUNDLE_IDENTIFIER = com.ld246.siyuan.debug;/g' siyuan-ios.xcodeproj/project.pbxproj
+          # The extension must keep its own identifier under the main app identifier.
+          sed -i '' \
+            -e 's/PRODUCT_BUNDLE_IDENTIFIER = com.ld246.siyuan;/PRODUCT_BUNDLE_IDENTIFIER = com.ld246.siyuan.debug;/g' \
+            -e 's/PRODUCT_BUNDLE_IDENTIFIER = com.ld246.siyuan.ShorthandShare;/PRODUCT_BUNDLE_IDENTIFIER = com.ld246.siyuan.debug.ShorthandShare;/g' \
+            siyuan-ios.xcodeproj/project.pbxproj
           git status
           git diff
 
@@ -60,23 +100,40 @@ jobs:
       - run: go version
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
 
-      - name: Install Node pnpm
-        run: npm install -g ${{ github.event.inputs.packageManager }}
+      - name: Install pnpm
+        id: pnpm
+        env:
+          PACKAGE_MANAGER: ${{ inputs.packageManager }}
+        run: |
+          EXPECTED="$(node -p 'require("./package.json").packageManager')"
+          PACKAGE_MANAGER="${PACKAGE_MANAGER:-$EXPECTED}"
+          if [[ ! "$PACKAGE_MANAGER" =~ ^pnpm@[0-9]+\.[0-9]+\.[0-9]+$ ]] || [ "$PACKAGE_MANAGER" != "$EXPECTED" ]; then
+            echo "::error::packageManager must match app/package.json: $EXPECTED"
+            exit 1
+          fi
+          npm install -g "$PACKAGE_MANAGER"
+          echo "package_manager=$PACKAGE_MANAGER" >> "$GITHUB_OUTPUT"
+        working-directory: ${{ github.workspace }}/siyuan-note/siyuan/app
+
+      - name: Get pnpm store directory
+        id: pnpm_store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
         working-directory: ${{ github.workspace }}/siyuan-note/siyuan/app
 
       - name: Cache pnpm store
         uses: actions/cache@v5
         with:
-          path: ~/.pnpm-store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('app/pnpm-lock.yaml') }}
-          restore-keys: pnpm-${{ runner.os }}-
+          path: ${{ steps.pnpm_store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm.outputs.package_manager }}-${{ hashFiles('siyuan-note/siyuan/app/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm.outputs.package_manager }}-
 
       - name: Install Node Dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
         working-directory: ${{ github.workspace }}/siyuan-note/siyuan/app
 
       - name: Building UI
@@ -84,54 +141,77 @@ jobs:
         working-directory: ${{ github.workspace }}/siyuan-note/siyuan/app
 
       - name: Set up gomobile
-        # 锁定到 kernel/go.mod 中 x/mobile 模块的同一版本,避免工具与库版本漂移。
-        # GOPATH 被显式指向 workspace 下,go install 的产物在 $GOPATH/bin,
-        # 该目录不在默认 PATH 上,需用全路径调用并写入 $GITHUB_PATH 供后续步骤使用。
+        # gomobile init installs gobind@latest, so pin gobind again after init.
+        working-directory: ${{ github.workspace }}/siyuan-note/siyuan/kernel
         run: |
-          go install golang.org/x/mobile/cmd/gomobile@2553ed8ce294
-          echo "$GOPATH/bin" >> $GITHUB_PATH
+          MOBILE_VERSION="$(go list -m -f '{{.Version}}' golang.org/x/mobile)"
+          go install "golang.org/x/mobile/cmd/gomobile@$MOBILE_VERSION"
+          echo "$GOPATH/bin" >> "$GITHUB_PATH"
           "$GOPATH/bin/gomobile" init
+          go install "golang.org/x/mobile/cmd/gobind@$MOBILE_VERSION"
         env:
           GOPATH: ${{ github.workspace }}/go
 
       - name: Building ios Kernel
         run: |
-          gomobile bind --tags "fts5 sqlcipher" -ldflags '-s -w' -v -target=ios -o "${{ matrix.config.kernel_path }}" ./
+          gomobile bind --tags "fts5 sqlcipher" -ldflags '-s -w' -v -target=ios -iosversion=15.1 -o "${{ matrix.config.kernel_path }}" ./
         working-directory: ${{ github.workspace }}/siyuan-note/siyuan/kernel/mobile
         env:
           GOPATH: ${{ github.workspace }}/go
-          GO111MODULE: on
-          CGO_ENABLED: 1
+          GO111MODULE: "on"
+          CGO_ENABLED: "1"
 
       - name: ios assets
         working-directory: ${{ github.workspace }}/siyuan-note/siyuan/app/
         run: |
-          mkdir -p ${{ github.workspace }}/siyuan-note/siyuan-ios/app/
-          cp -r ./appearance ./guide ./stage ./changelogs ${{ github.workspace }}/siyuan-note/siyuan-ios/app/
+          mkdir -p "$GITHUB_WORKSPACE/siyuan-note/siyuan-ios/app"
+          cp -r ./appearance ./guide ./stage ./changelogs "$GITHUB_WORKSPACE/siyuan-note/siyuan-ios/app/"
 
       - name: Building iOS
         working-directory: ${{ github.workspace }}/siyuan-note/siyuan-ios
+        env:
+          APP_VERSION: ${{ steps.release.outputs.app_version }}
         run: |
+          xcodebuild -version
           mkdir -p ../siyuan-ios-out/Payload
-          xcodebuild -workspace ./siyuan-ios.xcodeproj/project.xcworkspace -scheme siyuan-ios -sdk iphoneos -configuration Release CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO -derivedDataPath ../siyuan-ios-out
+          xcodebuild \
+            -workspace ./siyuan-ios.xcodeproj/project.xcworkspace \
+            -scheme siyuan-ios -sdk iphoneos -destination 'generic/platform=iOS' \
+            -configuration Release -derivedDataPath ../siyuan-ios-out \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION="$APP_VERSION" IPHONEOS_DEPLOYMENT_TARGET=15.1
+          APP=../siyuan-ios-out/Build/Products/Release-iphoneos/siyuan-ios.app
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")" = com.ld246.siyuan.debug
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/PlugIns/ShorthandShare.appex/Info.plist")" = com.ld246.siyuan.debug.ShorthandShare
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")" = "$APP_VERSION"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/PlugIns/ShorthandShare.appex/Info.plist")" = "$APP_VERSION"
           mv ../siyuan-ios-out/Build/Products/Release-iphoneos/siyuan-ios.app ../siyuan-ios-out/Payload
           cd ../siyuan-ios-out
-          zip -r Payload.zip Payload
-          mv Payload.zip siyuan.ipa
+          zip -qry "siyuan-$APP_VERSION-ios.ipa" Payload
+          unzip -tq "siyuan-$APP_VERSION-ios.ipa"
 
-      - uses: joutvhu/get-release@v1
-        id: get_current_release
+      - name: Save unsigned IPA artifact
+        uses: actions/upload-artifact@v7
         with:
-          tag_name: ${{ github.event.inputs.version }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: siyuan-${{ steps.release.outputs.app_version }}-ios-unsigned
+          path: ${{ github.workspace }}/siyuan-note/siyuan-ios-out/siyuan-${{ steps.release.outputs.app_version }}-ios.ipa
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
 
-      - name: Upload ios.ipa
-        uses: shogo82148/actions-upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload IPA to shared Release
+        uses: ncipollo/release-action@v1
         with:
-          upload_url: ${{ steps.get_current_release.outputs.upload_url }}
-          asset_name: siyuan-${{ github.event.inputs.version }}-ios.ipa
-          asset_path: ${{ github.workspace }}/siyuan-note/siyuan-ios-out/siyuan.ipa
-          asset_content_type: application/octet-stream
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ steps.release.outputs.tag }}
+          commit: ${{ github.sha }}
+          artifacts: ${{ github.workspace }}/siyuan-note/siyuan-ios-out/siyuan-${{ steps.release.outputs.app_version }}-ios.ipa
+          artifactContentType: application/octet-stream
+          artifactErrorsFailBuild: true
+          allowUpdates: true
+          omitBody: true
+          omitName: true
+          omitDraftDuringUpdate: true
+          omitPrereleaseDuringUpdate: true
+          replacesArtifacts: true
+          removeArtifacts: false

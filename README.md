@@ -27,9 +27,11 @@
 
 ## 关于 ios 应用
 
-- 如果手机支持 [巨魔TrollStore](https://github.com/opa334/TrollStore), 可以在 [Release](https://github.com/demoshang/siyuan-patch/releases) 下载 `ipa` 文件(未签名)安装
+- 在 [release-ios](https://github.com/mzzxll/siyuan-patch/actions/workflows/release-ios.yml) 点击 `Run workflow`，版本填写 `v3.8.6` 或 `3.8.6`。`packageManager` 留空时使用该版本源码中的 pnpm 版本。默认 `iosRef` 固定到与 v3.8.6 配套的 iOS 源码提交；构建其他版本时，需要同步填写兼容的 iOS 源码提交 SHA。
 
-- 否则, 不支持IOS, 因为签名证书需要花钱, 不花钱的只能使用7天, 所以就不提供了
+- 构建成功后，在本仓库 [Release](https://github.com/mzzxll/siyuan-patch/releases) 的对应版本中下载 `siyuan-3.8.6-ios.ipa`。IPA 和相同标签的 Mac ARM64 安装包放在同一个 Release。运行详情页的 `Artifacts` 也保存一份未签名 IPA，保留 14 天；下载 artifact 后解压即可取得 IPA。
+
+- IPA 未配置 Apple 签名，最低系统版本为 iOS 15.1。发布和下载不要求签名；安装方式取决于设备系统和安装工具。使用自己的证书签名时，需要同时配置主 App、分享扩展及 App Group 权限。安装后应验证分享扩展能将内容传回主 App。
 
 ## 没有最新版吗?
 

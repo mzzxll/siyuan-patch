@@ -96,8 +96,88 @@ jobs:
           GOPATH: ${{ github.workspace }}/go
           GOARCH: ${{ matrix.config.goarch }}
 
+      - name: Configure ad-hoc macOS signing
+        run: |
+          cat > adhoc-entitlements.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>com.apple.security.cs.allow-jit</key>
+            <true/>
+            <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+            <true/>
+            <key>com.apple.security.cs.disable-library-validation</key>
+            <true/>
+            <key>com.apple.security.device.audio-input</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("electron-builder-darwin-arm64.yml")
+          text = path.read_text()
+
+          old_identity = '  identity: "Yunnan Liandi Technology Co., Ltd."'
+          if old_identity not in text:
+              raise SystemExit(
+                  "Expected macOS signing identity not found; "
+                  "upstream electron-builder config may have changed"
+              )
+
+          text = text.replace(old_identity, '  identity: "-"', 1)
+          text = text.replace(
+              '  provisioningProfile: "../../SiYuan.provisionprofile"\n',
+              '',
+          )
+          text = text.replace(
+              '  entitlements: "../../entitlements.mas.plist"',
+              '  entitlements: "adhoc-entitlements.plist"',
+          )
+          text = text.replace(
+              '  entitlementsInherit: "../../entitlements.mas.plist"',
+              '  entitlementsInherit: "adhoc-entitlements.plist"',
+          )
+
+          path.write_text(text)
+          print("Configured electron-builder for ad-hoc signing:")
+          print(path.read_text())
+          PY
+        working-directory: ${{ github.workspace }}/siyuan-note/siyuan/app
+
       - name: Build Electron
         run: pnpm run ${{ matrix.config.electron_args }}
+        working-directory: ${{ github.workspace }}/siyuan-note/siyuan/app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Verify macOS code signature
+        run: |
+          APP_PATH="$(python3 - <<'PY'
+          from pathlib import Path
+
+          apps = list(Path("build").rglob("SiYuan.app"))
+          if not apps:
+              raise SystemExit("SiYuan.app not found under build/")
+          print(apps[0])
+          PY
+          )"
+
+          echo "Verifying: $APP_PATH"
+          codesign --verify --deep --strict --verbose=4 "$APP_PATH"
+
+          KERNEL_PATH="$APP_PATH/Contents/Resources/kernel/SiYuan-Kernel"
+          test -f "$KERNEL_PATH"
+          codesign --verify --strict --verbose=4 "$KERNEL_PATH"
+
+          echo "App signature:"
+          codesign -dv --verbose=4 "$APP_PATH" 2>&1 | grep -E 'Identifier|Signature|TeamIdentifier' || true
+
+          echo "Kernel signature:"
+          codesign -dv --verbose=4 "$KERNEL_PATH" 2>&1 | grep -E 'Identifier|Signature|TeamIdentifier' || true
         working-directory: ${{ github.workspace }}/siyuan-note/siyuan/app
 
       - uses: joutvhu/get-release@v1

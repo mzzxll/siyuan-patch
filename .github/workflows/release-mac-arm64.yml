@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "release version/tag (e.g. v3.8.6)"
+        description: "release version/tag (e.g. v3.8.6 or 3.8.6)"
         required: true
         type: string
       packageManager:
-        description: "pnpm@x.x.x"
-        required: true
+        description: "pnpm@x.x.x (leave empty to use app/package.json)"
+        required: false
         type: string
 
 permissions:
@@ -34,13 +34,25 @@ jobs:
         with:
           path: siyuan-note
 
-      - name: Clone origin and apply patches
+      - name: Validate release inputs
+        id: release
         env:
           VERSION: ${{ inputs.version }}
         run: |
+          APP_VERSION="${VERSION#v}"
+          if [[ ! "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version must be vX.Y.Z or X.Y.Z"
+            exit 1
+          fi
+          echo "tag=v$APP_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Clone origin and apply patches
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
           mkdir -p "${{ github.workspace }}/go"
           cd "${{ github.workspace }}/siyuan-note"
-          git clone --branch "$VERSION" https://github.com/siyuan-note/siyuan.git
+          git clone --branch "$TAG" https://github.com/siyuan-note/siyuan.git
           cd siyuan
           git apply --3way "${{ github.workspace }}/siyuan-note/patches/siyuan.patch"
           git status
@@ -60,9 +72,18 @@ jobs:
           node-version: 24
 
       - name: Install pnpm
+        id: pnpm
         env:
           PACKAGE_MANAGER: ${{ inputs.packageManager }}
-        run: npm install -g "$PACKAGE_MANAGER"
+        run: |
+          EXPECTED="$(node -p 'require("./package.json").packageManager')"
+          PACKAGE_MANAGER="${PACKAGE_MANAGER:-$EXPECTED}"
+          if [[ ! "$PACKAGE_MANAGER" =~ ^pnpm@[0-9]+\.[0-9]+\.[0-9]+$ ]] || [ "$PACKAGE_MANAGER" != "$EXPECTED" ]; then
+            echo "::error::packageManager must match app/package.json: $EXPECTED"
+            exit 1
+          fi
+          npm install -g "$PACKAGE_MANAGER"
+          echo "package_manager=$PACKAGE_MANAGER" >> "$GITHUB_OUTPUT"
         working-directory: ${{ github.workspace }}/siyuan-note/siyuan/app
 
       - name: Get pnpm store directory
@@ -74,9 +95,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ steps.pnpm_store.outputs.path }}
-          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.packageManager }}-${{ hashFiles('siyuan-note/siyuan/app/pnpm-lock.yaml') }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm.outputs.package_manager }}-${{ hashFiles('siyuan-note/siyuan/app/pnpm-lock.yaml') }}
           restore-keys: |
-            pnpm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.packageManager }}-
+            pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm.outputs.package_manager }}-
 
       - name: Install Node dependencies
         run: pnpm install --no-frozen-lockfile
@@ -183,7 +204,7 @@ jobs:
       - uses: joutvhu/get-release@v1
         id: get_current_release
         with:
-          tag_name: ${{ inputs.version }}
+          tag_name: ${{ steps.release.outputs.tag }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -195,5 +216,5 @@ jobs:
           allowUpdates: true
           omitBody: true
           omitName: true
-          tag: ${{ inputs.version }}
+          tag: ${{ steps.release.outputs.tag }}
           replacesArtifacts: true

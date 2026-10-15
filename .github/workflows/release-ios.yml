@@ -12,9 +12,9 @@ on:
         required: false
         type: string
       iosRef:
-        description: "siyuan-ios commit SHA (default matches v3.8.6; update for other versions)"
-        required: true
-        default: "caec608b218d026748dd93b4fdab8308e46e5341"
+        description: "siyuan-ios commit SHA (optional; defaults to the pinned commit)"
+        required: false
+        default: "857b7a76a3070de7398050b23a1417accece3ad7"
         type: string
 
 permissions:
@@ -44,7 +44,7 @@ jobs:
         id: release
         env:
           VERSION: ${{ inputs.version }}
-          IOS_REF: ${{ inputs.iosRef }}
+          IOS_REF: ${{ inputs.iosRef || '857b7a76a3070de7398050b23a1417accece3ad7' }}
         run: |
           APP_VERSION="${VERSION#v}"
           if [[ ! "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -61,7 +61,7 @@ jobs:
       - name: Clone origin and apply patches
         env:
           TAG: ${{ steps.release.outputs.tag }}
-          IOS_REF: ${{ inputs.iosRef }}
+          IOS_REF: ${{ inputs.iosRef || '857b7a76a3070de7398050b23a1417accece3ad7' }}
         run: |
           mkdir -p "$GITHUB_WORKSPACE/go"
           cd "$GITHUB_WORKSPACE/siyuan-note"

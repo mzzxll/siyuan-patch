@@ -11,11 +11,6 @@ on:
         description: "pnpm@x.x.x (leave empty to use app/package.json)"
         required: false
         type: string
-      iosRef:
-        description: "siyuan-ios commit SHA (optional; defaults to the pinned commit)"
-        required: false
-        default: "857b7a76a3070de7398050b23a1417accece3ad7"
-        type: string
 
 permissions:
   contents: write
@@ -44,24 +39,74 @@ jobs:
         id: release
         env:
           VERSION: ${{ inputs.version }}
-          IOS_REF: ${{ inputs.iosRef || '857b7a76a3070de7398050b23a1417accece3ad7' }}
         run: |
           APP_VERSION="${VERSION#v}"
           if [[ ! "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::version must be vX.Y.Z or X.Y.Z"
             exit 1
           fi
-          if [[ ! "$IOS_REF" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::iosRef must be a full commit SHA"
-            exit 1
-          fi
           echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$APP_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve iOS source commit
+        id: ios
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import urlencode, quote
+          from urllib.request import Request, urlopen
+
+          def get_json(path):
+              request = Request(
+                  "https://api.github.com/repos/" + path,
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "User-Agent": "siyuan-patch-ios-build",
+                  },
+              )
+              try:
+                  with urlopen(request, timeout=30) as response:
+                      return json.load(response)
+              except (HTTPError, URLError) as exc:
+                  raise SystemExit(
+                      f"::error::Cannot resolve iOS source: {exc}. "
+                      "Check that the official release exists and retry."
+                  ) from exc
+
+          tag = os.environ["TAG"]
+          release = get_json("siyuan-note/siyuan/releases/tags/" + quote(tag, safe=""))
+          published_at = release.get("published_at")
+          if not published_at:
+              raise SystemExit(f"::error::Official release {tag} has no publication time.")
+          query = urlencode({"until": published_at, "per_page": 1})
+          commits = get_json("siyuan-note/siyuan-ios/commits?" + query)
+          if not isinstance(commits, list) or not commits:
+              raise SystemExit(f"::error::No iOS commit found before {published_at}.")
+          ios_ref = commits[0]["sha"]
+          print(f"Official release: {tag}, published at {published_at}")
+          print(f"Selected iOS commit: {ios_ref}")
+          print("Selection is based on release time; runtime compatibility still needs verification.")
+
+          if not re.fullmatch(r"[0-9a-f]{40}", ios_ref):
+              raise SystemExit("::error::Resolved iosRef is not a full commit SHA")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"ref={ios_ref}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(f"iOS source for **{tag}**: [`{ios_ref}`](https://github.com/siyuan-note/siyuan-ios/commit/{ios_ref})\n")
+          PY
 
       - name: Clone origin and apply patches
         env:
           TAG: ${{ steps.release.outputs.tag }}
-          IOS_REF: ${{ inputs.iosRef || '857b7a76a3070de7398050b23a1417accece3ad7' }}
+          IOS_REF: ${{ steps.ios.outputs.ref }}
         run: |
           mkdir -p "$GITHUB_WORKSPACE/go"
           cd "$GITHUB_WORKSPACE/siyuan-note"

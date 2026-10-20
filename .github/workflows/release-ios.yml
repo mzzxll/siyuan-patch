@@ -199,7 +199,7 @@ jobs:
 
       - name: Building ios Kernel
         run: |
-          gomobile bind --tags "fts5 sqlcipher" -ldflags '-s -w' -v -target=ios -iosversion=15.1 -o "${{ matrix.config.kernel_path }}" ./
+          gomobile bind --tags "fts5 sqlcipher" -ldflags '-s -w' -v -target=ios -iosversion=16.0 -o "${{ matrix.config.kernel_path }}" ./
         working-directory: ${{ github.workspace }}/siyuan-note/siyuan/kernel/mobile
         env:
           GOPATH: ${{ github.workspace }}/go
@@ -224,7 +224,7 @@ jobs:
             -scheme siyuan-ios -sdk iphoneos -destination 'generic/platform=iOS' \
             -configuration Release -derivedDataPath ../siyuan-ios-out \
             CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
-            MARKETING_VERSION="$APP_VERSION" IPHONEOS_DEPLOYMENT_TARGET=15.1
+            MARKETING_VERSION="$APP_VERSION" IPHONEOS_DEPLOYMENT_TARGET=16.0
           APP=../siyuan-ios-out/Build/Products/Release-iphoneos/siyuan-ios.app
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")" = com.ld246.siyuan.debug
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/PlugIns/ShorthandShare.appex/Info.plist")" = com.ld246.siyuan.debug.ShorthandShare

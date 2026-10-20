@@ -25,7 +25,7 @@ jobs:
     strategy:
       matrix:
         config:
-          - os: macos-latest
+          - os: macos-26-intel
             kernel_path: "../ios/iosk.xcframework"
             target: "ios"
 

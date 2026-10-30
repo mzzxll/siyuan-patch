@@ -165,10 +165,10 @@ index 6961d9cc67e729b0ccb4ddaa69c6a66204411951..a869b3fff6aa09e59db5c1070e70e626
  	}
  
 diff --git a/kernel/model/updater.go b/kernel/model/updater.go
-index 480277b5a70d542cc0f5be5c22c94f7ae8b83369..e853bd2f7001316cc5df53a025d023cd33245c7b 100644
+index fa527ee22c75769700ab4ad02bb7507de80bbf07..52758c808ee516a0c8c3a073a268c548392f583b 100644
 --- a/kernel/model/updater.go
 +++ b/kernel/model/updater.go
-@@ -24,11 +24,9 @@ import (
+@@ -13,11 +13,9 @@ import (
  	"io"
  	"os"
  	"path/filepath"
@@ -180,7 +180,7 @@ index 480277b5a70d542cc0f5be5c22c94f7ae8b83369..e853bd2f7001316cc5df53a025d023cd
  	"github.com/imroc/req/v3"
  	"github.com/siyuan-note/logging"
  	"github.com/siyuan-note/siyuan/kernel/util"
-@@ -282,29 +280,7 @@ func isVersionUpToDate(releaseVer string) bool {
+@@ -362,29 +360,7 @@ func isVersionUpToDate(releaseVer string) bool {
  	return semver.Compare("v"+releaseVer, "v"+util.Ver) <= 0
  }
  
@@ -205,7 +205,7 @@ index 480277b5a70d542cc0f5be5c22c94f7ae8b83369..e853bd2f7001316cc5df53a025d023cd
 -		}
 -	}
 -
--	if skipInstallPkgPlatformCached == 1 || !confSystemSnapshot.DownloadInstallPkg {
+-	if skipInstallPkgPlatformCached == 1 {
 -		return true
 -	}
 -	return false

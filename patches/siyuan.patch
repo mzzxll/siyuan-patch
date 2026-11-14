@@ -93,20 +93,20 @@ index edf151e8eb5af3d51a068f3ba019f5d6730f76d5..46c5498306b654297a0e7a6e27a760c9
  })
  
 diff --git a/kernel/conf/appearance.go b/kernel/conf/appearance.go
-index a941a562cd98cdf873ed36d45317864d9f3677c8..018b23aa7aec0da4be891b1a1edf5316fe1522c2 100644
+index ba9ece8fcad69ea9650ccd68c07d33029b41eb46..f9d9ee61f850983b7c6d37748e7a1fc7763503d7 100644
 --- a/kernel/conf/appearance.go
 +++ b/kernel/conf/appearance.go
-@@ -69,8 +69,8 @@ func NewAppearanceForContainer(mobile bool) *Appearance {
- 		Icon:                "litheness",
- 		CodeBlockThemeLight: "github",
- 		CodeBlockThemeDark:  "base16/dracula",
--		Lang:                "en",
--		CloseButtonBehavior: 0,
-+		Lang:                "zh_CN",
-+		CloseButtonBehavior: 1,
- 		HideToolbar:         true,
- 		HideStatusBar:       false,
- 		StatusBar:           util.NewStatusBar(mobile),
+@@ -90,8 +90,8 @@
+ 		Icon:                  "litheness",
+ 		CodeBlockThemeLight:   "github",
+ 		CodeBlockThemeDark:    "base16/dracula",
+-		Lang:                  "en",
+-		CloseButtonBehavior:   0,
++		Lang:                  "zh_CN",
++		CloseButtonBehavior:   1,
+ 		HideToolbar:           true,
+ 		HideStatusBar:         false,
+ 		ShowFloatingStatusBar: false,
 diff --git a/kernel/conf/sync.go b/kernel/conf/sync.go
 index 2fdeb79c656288be08fb5ec7a886098d994c8c91..3156dad4dbed9b86a1b72e9be065830fcaf727ed 100644
 --- a/kernel/conf/sync.go
